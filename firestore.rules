@@ -1,0 +1,202 @@
+rules_version = '2';
+
+// Mural da Coleta — regras de segurança do Firestore.
+// Cole este conteúdo em Firestore Database -> Rules e clique em Publish.
+//
+// O que elas garantem:
+//  - o mural (coleção pesquisas) é de leitura pública, sem login;
+//  - o código de conclusão nunca é lido por ninguém: fica guardado apenas
+//    como impressão digital (SHA-256) e a regra compara a impressão enviada;
+//  - cada pesquisador registra no máximo uma participação por pesquisa,
+//    porque o identificador do documento é pesquisaId__uid;
+//  - o número de créditos de cada participação é conferido pela regra, a
+//    partir da duração declarada na pesquisa, e não vem do navegador;
+//  - créditos só nascem de duas formas: o saldo de boas-vindas, limitado a
+//    vinte, e uma participação registrada e conferida;
+//  - a ficha do pesquisador (e-mail, vínculo, Lattes) é lida apenas por ela
+//    mesma e pela administração;
+//  - administrador é quem tem um documento em admins com o próprio UID,
+//    criado à mão no console. Ninguém se promove pelo site.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logado() {
+      return request.auth != null;
+    }
+
+    function ehAdmin() {
+      return logado() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function fichaRef(uid) {
+      return /databases/$(database)/documents/pesquisadores/$(uid);
+    }
+
+    function minhaFicha() {
+      return get(fichaRef(request.auth.uid)).data;
+    }
+
+    function liberado() {
+      return logado()
+        && exists(fichaRef(request.auth.uid))
+        && minhaFicha().get('bloqueado', false) != true;
+    }
+
+    function pesquisa(id) {
+      return get(/databases/$(database)/documents/pesquisas/$(id)).data;
+    }
+
+    // Uma pesquisa de D minutos vale de 1 a 5 créditos: 1 crédito a cada 5
+    // minutos arredondados para cima. A mesma conta define o que o
+    // respondente ganha e o que a pesquisa paga por resposta recebida.
+    // Precisa ser idêntica à função valorEmCreditos() de app.js.
+    function valor(minutos) {
+      return minutos <= 5 ? 1
+        : minutos <= 10 ? 2
+        : minutos <= 15 ? 3
+        : minutos <= 20 ? 4
+        : 5;
+    }
+
+    function mudou(campos) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(campos);
+    }
+
+    // Saldo da própria carteira antes e depois da gravação em lote.
+    function carteiraAntes() {
+      return get(fichaRef(request.auth.uid)).data.creditos;
+    }
+
+    function carteiraDepois() {
+      return getAfter(fichaRef(request.auth.uid)).data.creditos;
+    }
+
+    // ---------- Configuração ----------
+    match /config/{doc} {
+      allow read: if true;
+      allow write: if ehAdmin();
+    }
+
+    // ---------- Administradores ----------
+    match /admins/{uid} {
+      allow read: if logado();
+      allow write: if false;
+    }
+
+    // ---------- Ficha do pesquisador ----------
+    match /pesquisadores/{uid} {
+      allow read: if ehAdmin() || (logado() && request.auth.uid == uid);
+
+      // Cadastro: a pessoa cria a própria ficha, com saldo de boas-vindas
+      // limitado e sem se marcar como liberada de nada.
+      allow create: if logado()
+        && request.auth.uid == uid
+        && request.resource.data.creditos is int
+        && request.resource.data.creditos >= 0
+        && request.resource.data.creditos <= 20
+        && request.resource.data.get('bloqueado', false) == false
+        && request.resource.data.nome is string
+        && request.resource.data.nome.size() >= 3;
+
+      // Edição do vínculo declarado. Não encosta no saldo nem no bloqueio.
+      allow update: if logado() && request.auth.uid == uid
+        && mudou(['nome', 'programa', 'instituicao', 'nivel', 'lattes', 'atualizadoEm']);
+
+      // Separar créditos da carteira para uma pesquisa: só pode diminuir.
+      allow update: if logado() && request.auth.uid == uid
+        && mudou(['creditos', 'atualizadoEm'])
+        && request.resource.data.creditos is int
+        && request.resource.data.creditos >= 0
+        && request.resource.data.creditos < resource.data.creditos;
+
+      // Receber créditos por uma participação registrada agora: a regra
+      // confere a participação criada no mesmo lote de gravação.
+      allow update: if liberado() && request.auth.uid == uid
+        && mudou(['creditos', 'ultimaParticipacao', 'atualizadoEm'])
+        && request.resource.data.ultimaParticipacao is string
+        && getAfter(/databases/$(database)/documents/participacoes/$(request.resource.data.ultimaParticipacao)).data.respondenteUid == request.auth.uid
+        && request.resource.data.creditos == resource.data.creditos
+             + getAfter(/databases/$(database)/documents/participacoes/$(request.resource.data.ultimaParticipacao)).data.creditos;
+
+      allow update, delete: if ehAdmin();
+    }
+
+    // ---------- Pesquisas (o mural) ----------
+    match /pesquisas/{id} {
+      allow read: if true;
+
+      // Depositar: os créditos que entram na pesquisa saem da carteira de
+      // quem deposita, no mesmo lote de gravação.
+      allow create: if liberado()
+        && request.resource.data.autorUid == request.auth.uid
+        && request.resource.data.titulo is string
+        && request.resource.data.titulo.size() >= 10
+        && request.resource.data.titulo.size() <= 180
+        && request.resource.data.resumo is string
+        && request.resource.data.resumo.size() >= 40
+        && request.resource.data.resumo.size() <= 1200
+        && request.resource.data.duracaoMin is int
+        && request.resource.data.duracaoMin >= 1
+        && request.resource.data.duracaoMin <= 40
+        && request.resource.data.tcleDeclarado == true
+        && request.resource.data.codigoHash is string
+        && request.resource.data.codigoHash.size() == 64
+        && request.resource.data.respostasRecebidas == 0
+        && request.resource.data.creditos is int
+        && request.resource.data.creditos >= 0
+        && request.resource.data.link is string
+        && request.resource.data.link.matches('^https?://.*')
+        && carteiraDepois() == carteiraAntes() - request.resource.data.creditos;
+
+      // O autor edita a própria pesquisa. Não reescreve a autoria nem o
+      // número de respostas já contabilizadas, e só aumenta os créditos da
+      // pesquisa se a própria carteira diminuir o mesmo tanto.
+      allow update: if liberado()
+        && resource.data.autorUid == request.auth.uid
+        && request.resource.data.autorUid == resource.data.autorUid
+        && request.resource.data.respostasRecebidas == resource.data.respostasRecebidas
+        && request.resource.data.duracaoMin is int
+        && request.resource.data.duracaoMin >= 1
+        && request.resource.data.duracaoMin <= 40
+        && request.resource.data.creditos is int
+        && request.resource.data.creditos >= 0
+        && (
+             request.resource.data.creditos <= resource.data.creditos
+             || carteiraDepois() == carteiraAntes() - (request.resource.data.creditos - resource.data.creditos)
+           );
+
+      // Quem responde só encosta no contador, na data e no orçamento da
+      // pesquisa, e o desconto tem de ser exatamente o valor declarado.
+      allow update: if liberado()
+        && resource.data.autorUid != request.auth.uid
+        && mudou(['respostasRecebidas', 'creditos', 'ultimaParticipacao'])
+        && request.resource.data.respostasRecebidas == resource.data.respostasRecebidas + 1
+        && request.resource.data.creditos == resource.data.creditos - valor(resource.data.duracaoMin)
+        && request.resource.data.creditos >= 0;
+
+      allow delete: if ehAdmin() || (liberado() && resource.data.autorUid == request.auth.uid);
+      allow update: if ehAdmin();
+    }
+
+    // ---------- Participações ----------
+    // Identificador fixo em pesquisaId__uid: uma por pesquisa, por pessoa.
+    match /participacoes/{partId} {
+      allow read: if ehAdmin()
+        || (logado() && resource.data.respondenteUid == request.auth.uid)
+        || (logado() && resource.data.autorUid == request.auth.uid);
+
+      allow create: if liberado()
+        && partId == request.resource.data.pesquisaId + '__' + request.auth.uid
+        && request.resource.data.respondenteUid == request.auth.uid
+        && pesquisa(request.resource.data.pesquisaId).autorUid != request.auth.uid
+        && pesquisa(request.resource.data.pesquisaId).autorUid == request.resource.data.autorUid
+        && pesquisa(request.resource.data.pesquisaId).status == 'ativa'
+        && pesquisa(request.resource.data.pesquisaId).codigoHash == request.resource.data.codigoHash
+        && request.resource.data.creditos == valor(pesquisa(request.resource.data.pesquisaId).duracaoMin);
+
+      allow update: if false;
+      allow delete: if ehAdmin();
+    }
+  }
+}

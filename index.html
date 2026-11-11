@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mural da Coleta</title>
+<meta name="description" content="Mural brasileiro de pesquisas acadêmicas abertas a respostas. Quem deposita o próprio instrumento de coleta responde ao de outras pessoas; quem só quer ajudar responde sem criar conta.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=Spectral:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+
+<a class="sr" href="#conteudo">Ir para o conteúdo</a>
+
+<header class="timbre">
+  <div class="timbre-faixa">
+    <a class="timbre-nome" href="#/mural">Mural da Coleta</a>
+    <span class="timbre-sub">Pesquisas acadêmicas brasileiras abertas a respostas</span>
+  </div>
+  <nav class="menu" aria-label="Seções do site">
+    <a href="#/mural" data-rota="mural">Mural</a>
+    <a href="#/como-funciona" data-rota="como-funciona">Como funciona</a>
+    <a href="#/depositar" data-rota="depositar">Depositar pesquisa</a>
+    <span class="separa"></span>
+    <span id="menu-conta"></span>
+  </nav>
+</header>
+
+<main id="conteudo" tabindex="-1">
+  <p class="sumario">Carregando o mural.</p>
+</main>
+
+<footer>
+  <div class="faixa">
+    <p><strong>Mural da Coleta</strong> reúne links de questionários de pesquisa e nada mais. As respostas são gravadas no formulário de cada pesquisador, nunca neste site.</p>
+    <p>A responsabilidade ética e metodológica de cada pesquisa é de quem a depositou. <a href="#/como-funciona">Regras da casa, ética e privacidade</a>.</p>
+  </div>
+</footer>
+
+<div id="recados" role="status" aria-live="polite"></div>
+
+<script src="firebase-config.js"></script>
+<script src="dados/exemplos.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
