@@ -3,8 +3,11 @@
 
 :root {
   --tinta: #16202F;
-  --tinta-70: rgba(22, 32, 47, .70);
-  --tinta-55: rgba(22, 32, 47, .55);
+  --tinta-70: rgba(22, 32, 47, .74);
+  /* Era .55, que dava contraste 3,7 sobre a folha: abaixo do mínimo de 4,5
+     e usado em informação útil, como "faltam 198 respostas". Em .64 passa
+     dos dois fundos do site. */
+  --tinta-55: rgba(22, 32, 47, .64);
   --tinta-14: rgba(22, 32, 47, .14);
   --tinta-07: rgba(22, 32, 47, .07);
   --papel: #F2F1EC;
@@ -178,6 +181,81 @@ main {
 .folha-encerrada .folha-titulo a { color: var(--tinta-70); }
 .folha-sem-credito { border-left-style: dashed; border-left-color: var(--ocra); }
 
+/* Folha com imagem: miniatura à esquerda, texto manda na direita. */
+.folha-com-capa {
+  display: flex;
+  gap: 1.1rem;
+  align-items: flex-start;
+}
+
+.folha-corpo { flex: 1 1 0; min-width: 0; }
+
+.capa {
+  flex: none;
+  width: 9.5rem;
+  aspect-ratio: 4 / 3;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--tinta-07);
+}
+
+.capa img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.capa-grande {
+  margin: 0 0 1.5rem;
+  border: 1px solid var(--tinta-14);
+  border-radius: var(--raio);
+  overflow: hidden;
+  background: var(--folha);
+}
+
+.capa-grande img { width: 100%; display: block; }
+
+.previa {
+  margin: .75rem 0 0;
+  max-width: 22rem;
+}
+
+.previa img {
+  width: 100%;
+  display: block;
+  border: 1px solid var(--tinta-14);
+  border-radius: var(--raio);
+}
+
+.previa figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  align-items: center;
+  margin-top: .5rem;
+}
+
+/* Barra de meta: é o que decide a ordem do mural, então aparece na folha. */
+.progresso { margin: 0 0 .9rem; max-width: 26rem; }
+
+.progresso-trilho {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(22, 32, 47, .12);
+  overflow: hidden;
+}
+
+/* Uma coleta no começo tem poucos por cento; a barra ainda precisa
+   aparecer, senão parece defeito. */
+.progresso-feito {
+  height: 100%;
+  min-width: 4px;
+  background: var(--caneta);
+  border-radius: 3px;
+}
+
+.progresso-texto {
+  font-size: .8125rem;
+  color: var(--tinta-55);
+  margin: .35rem 0 0;
+}
+
 .folha-titulo {
   font-family: var(--serif);
   font-size: 1.2rem;
@@ -227,6 +305,45 @@ main {
 .dado-selo { color: var(--selo); border-color: rgba(42, 98, 72, .35); background: rgba(42, 98, 72, .06); }
 .dado-aviso { color: var(--ocra); border-color: rgba(138, 106, 47, .35); background: rgba(138, 106, 47, .06); }
 .dado-exemplo { color: var(--carimbo); border-color: rgba(90, 74, 159, .3); background: rgba(90, 74, 159, .05); }
+.dado-nota { color: var(--carimbo); border-color: rgba(90, 74, 159, .3); background: rgba(90, 74, 159, .05); }
+.dado-novo { color: var(--caneta); border-color: rgba(31, 58, 104, .45); background: rgba(31, 58, 104, .08); font-weight: 500; }
+
+/* Avaliação ao registrar participação */
+.notas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.nota { margin: 0; font-weight: 400; }
+.nota input { position: absolute; opacity: 0; width: 0; height: 0; }
+
+.nota span {
+  display: block;
+  min-width: 2.5rem;
+  text-align: center;
+  padding: .5rem .55rem;
+  font-size: .9rem;
+  line-height: 1;
+  border: 1px solid var(--tinta-14);
+  border-radius: var(--raio);
+  background: var(--folha);
+  cursor: pointer;
+}
+
+.nota-larga span { min-width: 6rem; }
+.nota span:hover { border-color: rgba(22, 32, 47, .35); }
+
+.nota input:checked + span {
+  background: var(--carimbo);
+  border-color: var(--carimbo);
+  color: #fff;
+}
+
+.nota input:focus-visible + span {
+  outline: 2px solid var(--carimbo);
+  outline-offset: 2px;
+}
 
 .folha-pe {
   display: flex;
@@ -285,16 +402,20 @@ main {
 
 /* ---------- Botões ---------- */
 
+/* Alvo de toque de 44px: abaixo disso, errar o botão no celular é comum. */
 .btn {
   font: 500 .9rem/1 var(--sans);
-  padding: .62rem .95rem;
+  padding: .8rem 1.1rem;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--raio);
   border: 1px solid var(--caneta);
   background: var(--caneta);
   color: #fff;
   cursor: pointer;
   text-decoration: none;
-  display: inline-block;
   transition: background .12s linear, border-color .12s linear;
 }
 
@@ -313,7 +434,7 @@ main {
 .btn-risco { border-color: var(--vermelho); color: var(--vermelho); background: transparent; }
 .btn-risco:hover { background: rgba(140, 47, 47, .07); color: var(--vermelho); }
 
-.btn-mini { font-size: .8rem; padding: .4rem .6rem; }
+.btn-mini { font-size: .8rem; padding: .55rem .75rem; min-height: 40px; }
 
 .btn:disabled, .btn[aria-disabled="true"] {
   opacity: .5;
@@ -478,6 +599,186 @@ textarea { resize: vertical; min-height: 5.5rem; }
   line-height: 1;
 }
 
+/* ---------- Chamada de ação da ficha ---------- */
+
+/* Tudo que o respondente precisa para decidir, acima da dobra. */
+.chamada {
+  background: var(--folha);
+  border: 1px solid var(--tinta-14);
+  border-left: 4px solid var(--caneta);
+  border-radius: var(--raio);
+  padding: 1.15rem 1.3rem 1.25rem;
+  margin-bottom: 1.4rem;
+}
+
+ul.essenciais {
+  list-style: none;
+  margin: 0 0 1.1rem;
+  padding: 0;
+  max-width: var(--faixa);
+}
+
+ul.essenciais li {
+  position: relative;
+  padding-left: 1.3rem;
+  margin-bottom: .45rem;
+  line-height: 1.5;
+  font-size: 1rem;
+}
+
+ul.essenciais li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: .55em;
+  width: .45rem;
+  height: .45rem;
+  border-radius: 50%;
+  background: var(--caneta);
+}
+
+.btn-grande {
+  font-size: 1.05rem;
+  padding: 1rem 1.6rem;
+  min-height: 52px;
+}
+
+.chamada .progresso { margin: 1.1rem 0 0; }
+
+.bloco-volta { border-left: 4px solid var(--selo); }
+
+.titulo-detalhes {
+  font-size: 1.05rem;
+  margin-bottom: .6rem;
+  color: var(--tinta-70);
+}
+
+/* ---------- Filtros recolhidos ---------- */
+
+.filtros-caixa {
+  background: var(--folha);
+  border: 1px solid var(--tinta-14);
+  border-radius: var(--raio);
+  margin-bottom: 1.4rem;
+}
+
+.filtros-caixa summary {
+  cursor: pointer;
+  padding: .85rem 1rem;
+  font-size: .925rem;
+  color: var(--tinta-70);
+}
+
+.filtros-caixa summary:hover { color: var(--tinta); }
+.filtros-caixa[open] summary { border-bottom: 1px solid var(--tinta-07); }
+.filtros-caixa .filtros { border: 0; margin-bottom: 0; background: transparent; }
+
+/* ---------- Canal de denúncia, no pé da ficha ---------- */
+
+.denuncia {
+  background: var(--folha);
+  border: 1px solid var(--tinta-14);
+  border-radius: var(--raio);
+  padding: .85rem 1.1rem;
+  margin-bottom: 1.1rem;
+}
+
+.denuncia summary {
+  cursor: pointer;
+  font-size: .925rem;
+  color: var(--tinta-70);
+  list-style-position: outside;
+}
+
+.denuncia summary:hover { color: var(--tinta); }
+.denuncia[open] summary { margin-bottom: .9rem; font-weight: 500; color: var(--tinta); }
+.denuncia .campo { max-width: 30rem; }
+
+/* ---------- Leitura dos números, no painel do autor ---------- */
+
+.leitura {
+  font-family: var(--serif);
+  font-size: .975rem;
+  line-height: 1.5;
+  margin: 0 0 .9rem;
+  padding-left: .75rem;
+  border-left: 3px solid var(--tinta-14);
+  color: var(--tinta-70);
+  max-width: var(--faixa);
+}
+
+.leitura-aviso { border-left-color: var(--ocra); color: var(--tinta); }
+.leitura-bom { border-left-color: var(--selo); }
+
+/* ---------- Código de conclusão, na tela de instalação ---------- */
+
+.bloco-codigo { border-left: 4px solid var(--carimbo); }
+
+.codigo-grande {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: 1.6rem;
+  letter-spacing: .06em;
+  color: var(--carimbo);
+  margin: .3rem 0 0;
+  word-break: break-all;
+}
+
+.trecho {
+  font-family: var(--sans);
+  font-size: .875rem;
+  line-height: 1.6;
+  background: #FBFBF9;
+  border: 1px solid var(--tinta-14);
+  border-radius: var(--raio);
+  padding: .85rem 1rem;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: var(--faixa);
+}
+
+ol.passos {
+  max-width: var(--faixa);
+  padding-left: 1.2rem;
+  margin: 0 0 .9rem;
+  line-height: 1.6;
+}
+
+ol.passos li { margin-bottom: .35rem; }
+
+/* ---------- Gráfico de tráfego ---------- */
+
+.gráfico-caixa {
+  background: var(--folha);
+  border: 1px solid var(--tinta-14);
+  border-radius: var(--raio);
+  padding: 1rem 1rem .6rem;
+  margin-bottom: 1.2rem;
+}
+
+.gráfico-caixa svg { display: block; }
+
+.legenda {
+  font-size: .8125rem;
+  color: var(--tinta-55);
+  margin: .4rem 0 0;
+  max-width: none;
+}
+
+.chave {
+  display: inline-block;
+  width: .65rem;
+  height: .65rem;
+  border-radius: 2px;
+  margin: 0 .25rem 0 .9rem;
+}
+
+.legenda .chave:first-child { margin-left: 0; }
+.chave-visitas { background: var(--caneta); }
+.chave-aberturas { background: var(--carimbo); }
+.chave-cliques { background: var(--selo); }
+
 /* ---------- Tabelas ---------- */
 
 .rolagem { overflow-x: auto; margin-bottom: 1.2rem; }
@@ -565,7 +866,9 @@ td.num { text-align: right; white-space: nowrap; }
 
 /* ---------- Detalhe da pesquisa ---------- */
 
-.detalhe-topo { margin-bottom: 1.4rem; }
+.detalhe-topo { margin-bottom: 1.4rem; position: relative; }
+
+.carimbo-linha { margin-top: .9rem; }
 
 .detalhe-topo h1 { max-width: 40ch; margin-bottom: .45rem; }
 
@@ -629,8 +932,17 @@ footer a { color: var(--tinta-70); }
   h1 { font-size: 1.5rem; }
   main { padding: 1.35rem 1rem 3rem; }
   .timbre-faixa, nav.menu { padding-left: 1rem; padding-right: 1rem; }
+  /* O cabeçalho comia um quinto da primeira tela do celular. */
+  .timbre-faixa { padding-top: .75rem; padding-bottom: .5rem; }
+  .timbre-sub { display: none; }
+  nav.menu { padding-bottom: .55rem; gap: .2rem .9rem; font-size: .875rem; }
+  .essenciais { font-size: .95rem; }
+  .btn-grande { width: 100%; }
   .carimbo-canto { position: static; margin: 0 0 .75rem; max-width: none; }
   .folha { padding: 1rem; }
+  .folha-com-capa { flex-direction: column; gap: .85rem; }
+  .capa { width: 100%; aspect-ratio: 16 / 9; }
+  .nota-larga span { min-width: 5rem; }
   dl.fichario dt { flex: 1 1 100%; }
   .saldo { gap: 1rem 1.75rem; }
 }
