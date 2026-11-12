@@ -283,6 +283,11 @@ service cloud.firestore {
 
       allow delete: if ehAdmin() || (liberado() && resource.data.autorUid == request.auth.uid);
       allow update: if ehAdmin();
+
+      // A administração também cria: é assim que as dez pesquisas de
+      // exemplo entram no mural, e elas têm autoria 'exemplo', que a regra
+      // de depósito acima recusaria por não ser o uid de quem grava.
+      allow create: if ehAdmin();
     }
 
     // ---------- Denúncias ----------

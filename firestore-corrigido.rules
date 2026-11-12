@@ -1,0 +1,382 @@
+rules_version = '2';
+
+// Mural da Coleta — regras de segurança do Firestore.
+// Cole este conteúdo em Firestore Database -> Rules e clique em Publish.
+//
+// O que elas garantem:
+//  - o mural (coleção pesquisas) é de leitura pública, sem login;
+//  - o código de conclusão nunca é lido por ninguém: fica guardado apenas
+//    como impressão digital (SHA-256) e a regra compara a impressão enviada;
+//  - cada pesquisador registra no máximo uma participação por pesquisa,
+//    porque o identificador do documento é pesquisaId__uid;
+//  - a ficha do pesquisador (e-mail, vínculo, Lattes) é lida apenas por ela
+//    mesma e pela administração;
+//  - o e-mail fundador abaixo é sempre administrador, mesmo com o banco
+//    vazio; os demais administradores são criados pela tela do site.
+//
+// As regras valem com a economia de créditos LIGADA ou DESLIGADA. Com ela
+// desligada (o estado atual), as participações valem zero crédito e as
+// carteiras não se mexem. Ligando CREDITOS_LIGADOS em app.js, os mesmos
+// limites de crédito passam a ser conferidos aqui, sem alterar este arquivo.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Precisa ser igual a ADMIN_FUNDADOR em app.js.
+    function emailFundador() {
+      return 'wellington1989fortunato@gmail.com';
+    }
+
+    function logado() {
+      return request.auth != null;
+    }
+
+    function ehFundador() {
+      return logado() && request.auth.token.get('email', '') == emailFundador();
+    }
+
+    function ehAdmin() {
+      return ehFundador()
+        || (logado() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function fichaRef(uid) {
+      return /databases/$(database)/documents/pesquisadores/$(uid);
+    }
+
+    function minhaFicha() {
+      return get(fichaRef(request.auth.uid)).data;
+    }
+
+    function liberado() {
+      return logado()
+        && exists(fichaRef(request.auth.uid))
+        && minhaFicha().get('bloqueado', false) != true;
+    }
+
+    function pesquisa(id) {
+      return get(/databases/$(database)/documents/pesquisas/$(id)).data;
+    }
+
+    // Uma pesquisa de D minutos vale de 1 a 5 créditos: 1 crédito a cada 5
+    // minutos arredondados para cima. Precisa ser idêntica à função
+    // valorEmCreditos() de app.js.
+    function valor(minutos) {
+      return minutos <= 5 ? 1
+        : minutos <= 10 ? 2
+        : minutos <= 15 ? 3
+        : minutos <= 20 ? 4
+        : 5;
+    }
+
+    function mudou(campos) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(campos);
+    }
+
+    function carteiraAntes() {
+      return get(fichaRef(request.auth.uid)).data.creditos;
+    }
+
+    function carteiraDepois() {
+      return getAfter(fichaRef(request.auth.uid)).data.creditos;
+    }
+
+    // Uma nota de clareza é um inteiro de 1 a 5.
+    function notaValida(n) {
+      return n is int && n >= 1 && n <= 5;
+    }
+
+    // ---------- Configuração ----------
+    match /config/{doc} {
+      allow read: if true;
+      allow write: if ehAdmin();
+    }
+
+    // ---------- Métricas de acesso ----------
+    // Uma soma por dia, sem cookie, sem IP e sem identificar ninguém.
+    // Qualquer visitante pode somar, porque medir visita de quem não tem
+    // conta é o objetivo; a regra limita o que pode ser escrito a um
+    // incremento de um, em três campos conhecidos.
+    // Isto não impede que alguém com um script infle os números: é um
+    // contador de tendência, não um sistema de auditoria.
+    function somaUm(campo) {
+      return request.resource.data.get(campo, 0) == resource.data.get(campo, 0) + 1;
+    }
+
+    function inalterado(campo) {
+      return request.resource.data.get(campo, 0) == resource.data.get(campo, 0);
+    }
+
+    match /metricas/{dia} {
+      allow read: if ehAdmin();
+
+      allow create: if request.resource.data.keys().hasOnly(['dia', 'visitas', 'aberturas', 'cliques'])
+        && request.resource.data.get('visitas', 0) in [0, 1]
+        && request.resource.data.get('aberturas', 0) in [0, 1]
+        && request.resource.data.get('cliques', 0) in [0, 1];
+
+      allow update: if request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['dia', 'visitas', 'aberturas', 'cliques'])
+        && (
+             (somaUm('visitas') && inalterado('aberturas') && inalterado('cliques'))
+             || (somaUm('aberturas') && inalterado('visitas') && inalterado('cliques'))
+             || (somaUm('cliques') && inalterado('visitas') && inalterado('aberturas'))
+           );
+
+      allow delete: if ehAdmin();
+    }
+
+    // ---------- Administradores ----------
+    // O fundador inclui e remove pela tela do site. Ninguém se promove:
+    // a regra exige que quem grava já seja administrador, e o documento
+    // precisa ter o identificador da pessoa promovida.
+    match /admins/{uid} {
+      allow read: if logado();
+      allow create, update, delete: if ehAdmin() && request.auth.uid != uid;
+    }
+
+    // ---------- Ficha do pesquisador ----------
+    match /pesquisadores/{uid} {
+      allow read: if ehAdmin() || (logado() && request.auth.uid == uid);
+
+      // Cadastro livre: a pessoa cria a própria ficha. O saldo inicial é
+      // zero com a economia desligada, e no máximo vinte quando ligada.
+      allow create: if logado()
+        && request.auth.uid == uid
+        && request.resource.data.creditos is int
+        && request.resource.data.creditos >= 0
+        && request.resource.data.creditos <= 20
+        && request.resource.data.get('bloqueado', false) == false
+        && request.resource.data.nome is string
+        && request.resource.data.nome.size() >= 3;
+
+      // Edição do vínculo declarado. Não encosta no saldo nem no bloqueio.
+      allow update: if logado() && request.auth.uid == uid
+        && mudou(['nome', 'programa', 'instituicao', 'nivel', 'lattes', 'atualizadoEm']);
+
+      // Separar créditos da carteira para uma pesquisa: só pode diminuir.
+      allow update: if logado() && request.auth.uid == uid
+        && mudou(['creditos', 'atualizadoEm'])
+        && request.resource.data.creditos is int
+        && request.resource.data.creditos >= 0
+        && request.resource.data.creditos < resource.data.creditos;
+
+      // Receber créditos por uma participação registrada agora: a regra
+      // confere a participação criada no mesmo lote de gravação.
+      allow update: if liberado() && request.auth.uid == uid
+        && mudou(['creditos', 'ultimaParticipacao', 'atualizadoEm'])
+        && request.resource.data.ultimaParticipacao is string
+        && getAfter(/databases/$(database)/documents/participacoes/$(request.resource.data.ultimaParticipacao)).data.respondenteUid == request.auth.uid
+        && request.resource.data.creditos == resource.data.creditos
+             + getAfter(/databases/$(database)/documents/participacoes/$(request.resource.data.ultimaParticipacao)).data.creditos;
+
+      allow update, delete: if ehAdmin();
+    }
+
+    // ---------- Pesquisas (o mural) ----------
+    // Uma pesquisa publicada precisa de link, código e TCLE. Um rascunho,
+    // que fica fora do mural, pode esperar por esses três.
+    function pesquisaPronta(d) {
+      return d.tcleDeclarado == true
+        && d.codigoHash is string
+        && d.codigoHash.size() == 64
+        && d.link is string
+        && d.link.matches('^https?://.*');
+    }
+
+    function statusValido(s) {
+      return s in ['ativa', 'rascunho', 'encerrada'];
+    }
+
+    // 'oculta' só a administração aplica e só ela retira: é o degrau entre
+    // deixar a pesquisa no ar e apagá-la para sempre.
+    function statusDeAdmin(s) {
+      return s == 'oculta';
+    }
+
+    match /pesquisas/{id} {
+      allow read: if true;
+
+      // Depositar. Com créditos zero não há carteira a conferir; com
+      // créditos, eles saem da carteira no mesmo lote de gravação.
+      allow create: if liberado()
+        && request.resource.data.autorUid == request.auth.uid
+        && request.resource.data.titulo is string
+        && request.resource.data.titulo.size() >= 10
+        && request.resource.data.titulo.size() <= 180
+        && request.resource.data.resumo is string
+        && request.resource.data.resumo.size() >= 40
+        && request.resource.data.resumo.size() <= 1200
+        && request.resource.data.duracaoMin is int
+        && request.resource.data.duracaoMin >= 1
+        && request.resource.data.duracaoMin <= 40
+        && request.resource.data.respostasRecebidas == 0
+        && request.resource.data.creditos is int
+        && request.resource.data.creditos >= 0
+        && statusValido(request.resource.data.status)
+        && (
+             request.resource.data.status == 'rascunho'
+             || pesquisaPronta(request.resource.data)
+           )
+        && (
+             request.resource.data.creditos == 0
+             || carteiraDepois() == carteiraAntes() - request.resource.data.creditos
+           );
+
+      // O autor edita a própria pesquisa. Não reescreve a autoria, o número
+      // de respostas nem as avaliações recebidas, não se devolve ao mural
+      // depois de ser retirado pela administração, e só aumenta os créditos
+      // da pesquisa se a própria carteira diminuir o mesmo tanto.
+      allow update: if liberado()
+        && resource.data.autorUid == request.auth.uid
+        && resource.data.get('status', 'ativa') != 'oculta'
+        && !statusDeAdmin(request.resource.data.status)
+        && request.resource.data.get('motivoOcultacao', '') == resource.data.get('motivoOcultacao', '')
+        && request.resource.data.get('notaInterna', '') == resource.data.get('notaInterna', '')
+        && request.resource.data.get('denuncias', 0) == resource.data.get('denuncias', 0)
+        && request.resource.data.autorUid == resource.data.autorUid
+        && request.resource.data.respostasRecebidas == resource.data.respostasRecebidas
+        && request.resource.data.get('notaSoma', 0) == resource.data.get('notaSoma', 0)
+        && request.resource.data.get('notaQtd', 0) == resource.data.get('notaQtd', 0)
+        && inalterado('visualizacoes')
+        && inalterado('cliques')
+        && request.resource.data.duracaoMin is int
+        && request.resource.data.duracaoMin >= 1
+        && request.resource.data.duracaoMin <= 40
+        && request.resource.data.creditos is int
+        && request.resource.data.creditos >= 0
+        && statusValido(request.resource.data.status)
+        && (
+             request.resource.data.status == 'rascunho'
+             || pesquisaPronta(request.resource.data)
+           )
+        && (
+             request.resource.data.creditos <= resource.data.creditos
+             || carteiraDepois() == carteiraAntes() - (request.resource.data.creditos - resource.data.creditos)
+           );
+
+      // Quem responde encosta apenas no contador, na data, na avaliação e
+      // no orçamento. O desconto é zero (economia desligada) ou exatamente
+      // o valor declarado, e a nota tem de estar entre um e cinco.
+      allow update: if liberado()
+        && resource.data.autorUid != request.auth.uid
+        && mudou(['respostasRecebidas', 'creditos', 'ultimaParticipacao',
+                  'notaSoma', 'notaQtd', 'tempoMais', 'tempoMenos'])
+        && request.resource.data.respostasRecebidas == resource.data.respostasRecebidas + 1
+        && request.resource.data.notaQtd == resource.data.get('notaQtd', 0) + 1
+        && notaValida(request.resource.data.notaSoma - resource.data.get('notaSoma', 0))
+        && request.resource.data.creditos >= 0
+        && (
+             request.resource.data.creditos == resource.data.creditos
+             || request.resource.data.creditos == resource.data.creditos - valor(resource.data.duracaoMin)
+           );
+
+      // Contagem de quem abriu a ficha, de quem clicou no questionário e de
+      // quem denunciou. Vale para visitante sem conta, e só soma um por vez.
+      allow update: if request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['visualizacoes', 'cliques', 'denuncias'])
+        && (
+             (somaUm('visualizacoes') && inalterado('cliques') && inalterado('denuncias'))
+             || (somaUm('cliques') && inalterado('visualizacoes') && inalterado('denuncias'))
+             || (somaUm('denuncias') && inalterado('visualizacoes') && inalterado('cliques'))
+           );
+
+      allow delete: if ehAdmin() || (liberado() && resource.data.autorUid == request.auth.uid);
+      allow update: if ehAdmin();
+
+      // A administração também cria: é assim que as dez pesquisas de
+      // exemplo entram no mural, e elas têm autoria 'exemplo', que a regra
+      // de depósito acima recusaria por não ser o uid de quem grava.
+      allow create: if ehAdmin();
+    }
+
+    // ---------- Denúncias ----------
+    // Qualquer pessoa pode avisar que há algo errado com uma pesquisa,
+    // inclusive sem conta: quem encontra o problema costuma ser quem
+    // responde, e quem responde não tem cadastro aqui. Só a administração
+    // lê, para a caixa não virar vitrine de acusação.
+    match /denuncias/{id} {
+      allow read, update, delete: if ehAdmin();
+
+      allow create: if request.resource.data.keys()
+            .hasOnly(['pesquisaId', 'pesquisaTitulo', 'motivo', 'texto', 'status', 'criadoEm'])
+        && request.resource.data.pesquisaId is string
+        && exists(/databases/$(database)/documents/pesquisas/$(request.resource.data.pesquisaId))
+        && request.resource.data.motivo is string
+        && request.resource.data.motivo.size() <= 120
+        && request.resource.data.texto is string
+        && request.resource.data.texto.size() <= 600
+        && request.resource.data.status == 'aberta';
+    }
+
+    // ---------- Registro de ações da administração ----------
+    // Só cresce. Nem a administração edita ou apaga pelo site, porque o
+    // valor do registro está exatamente em não poder ser ajustado depois.
+    match /registro/{id} {
+      allow read: if ehAdmin();
+      allow create: if ehAdmin()
+        && request.resource.data.quem == request.auth.token.get('email', '')
+        && request.resource.data.acao is string
+        && request.resource.data.acao.size() <= 60;
+      allow update, delete: if false;
+    }
+
+    // ---------- Reciprocidade ----------
+    // Quantas pesquisas de colegas cada pessoa respondeu. É público, porque
+    // aparece na ficha dela, e só cresce junto com uma participação real
+    // registrada no mesmo lote de gravação.
+    match /reputacao/{uid} {
+      allow read: if true;
+
+      allow create: if liberado() && request.auth.uid == uid
+        && request.resource.data.respondidas == 1;
+
+      allow update: if liberado() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['respondidas', 'ultimaEm'])
+        && request.resource.data.respondidas == resource.data.respondidas + 1;
+
+      allow delete: if ehAdmin();
+    }
+
+    // ---------- Imagens das pesquisas ----------
+    // A capa grande fica fora do documento da pesquisa para o mural não
+    // precisar carregar imagem nenhuma. O identificador é o da pesquisa.
+    match /imagens/{id} {
+      allow read: if true;
+
+      allow create, update: if liberado()
+        && request.resource.data.autorUid == request.auth.uid
+        && request.resource.data.imagem is string
+        && request.resource.data.imagem.size() < 700000
+        && request.resource.data.imagem.matches('^data:image/(jpeg|png|webp);base64,.*');
+
+      allow delete: if ehAdmin()
+        || (liberado() && resource.data.autorUid == request.auth.uid);
+    }
+
+    // ---------- Participações ----------
+    // Identificador fixo em pesquisaId__uid: uma por pesquisa, por pessoa.
+    match /participacoes/{partId} {
+      allow read: if ehAdmin()
+        || (logado() && resource.data.respondenteUid == request.auth.uid)
+        || (logado() && resource.data.autorUid == request.auth.uid);
+
+      allow create: if liberado()
+        && partId == request.resource.data.pesquisaId + '__' + request.auth.uid
+        && request.resource.data.respondenteUid == request.auth.uid
+        && pesquisa(request.resource.data.pesquisaId).autorUid != request.auth.uid
+        && pesquisa(request.resource.data.pesquisaId).autorUid == request.resource.data.autorUid
+        && pesquisa(request.resource.data.pesquisaId).status == 'ativa'
+        && pesquisa(request.resource.data.pesquisaId).codigoHash == request.resource.data.codigoHash
+        && notaValida(request.resource.data.nota)
+        && request.resource.data.tempo in ['menos', 'bateu', 'mais']
+        && (
+             request.resource.data.creditos == 0
+             || request.resource.data.creditos == valor(pesquisa(request.resource.data.pesquisaId).duracaoMin)
+           );
+
+      allow update: if false;
+      allow delete: if ehAdmin();
+    }
+  }
+}
